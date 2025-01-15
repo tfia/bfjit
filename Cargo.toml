@@ -4,4 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+dynasm = "3.0.1"
+dynasmrt = "3.0.1"
 thiserror = "2.0.11"
