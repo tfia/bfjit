@@ -20,3 +20,5 @@ pub enum VMError {
     #[error("Runtime: {0}")]
     Runtime(#[from] RuntimeError)
 }
+
+pub type Result<T> = std::result::Result<T, VMError>;
