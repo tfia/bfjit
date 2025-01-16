@@ -1,4 +1,5 @@
 mod bfir;
+mod error;
 
 use dynasm::dynasm;
 use dynasmrt::{DynasmApi, DynasmLabelApi};

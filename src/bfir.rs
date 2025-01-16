@@ -35,6 +35,8 @@ impl fmt::Display for CompileError {
     }
 }
 
+impl std::error::Error for CompileError {}
+
 pub fn optimize(ir: &mut Vec<BfIR>) {
     let len = ir.len();
     let mut i = 0;
