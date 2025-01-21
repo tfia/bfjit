@@ -1,47 +1,41 @@
 mod bfir;
-mod error;
 mod bfjit;
+mod error;
 
-use dynasm::dynasm;
-use dynasmrt::{DynasmApi, DynasmLabelApi};
+use crate::bfjit::BfVM;
 
-use std::io::{stdout, Write};
+use std::io::{stdin, stdout};
+use std::path::PathBuf;
 
-unsafe extern "sysv64" fn print(buf: *const u8, len: u64) -> u8 {
-    let ret = std::panic::catch_unwind(|| {
-        let buf = std::slice::from_raw_parts(buf, len as usize);
-        stdout().write_all(buf).is_err()
-    });
-    match ret {
-        Ok(false) => 0,
-        Ok(true) => 1,
-        Err(_) => 2
-    }
+use clap::Parser;
+
+#[derive(Debug, clap::Parser)]
+#[clap(version)]
+struct Opt {
+    #[clap(name = "FILE")]
+    file_path: PathBuf,
+
+    #[clap(short = 'O', long = "optimize", help = "Optimize code")]
+    optimize: bool,
 }
 
 fn main() {
-    let mut ops = dynasmrt::x64::Assembler::new().unwrap();
-    let hello_string = b"Hello, JIT!\n";
+    let opt = Opt::parse();
 
-    dynasm!(ops
-        ; .arch x64
-        ; ->hello :
-        ; .bytes hello_string);
+    let stdin = stdin();
+    let stdout = stdout();
 
-    let hello = ops.offset();
-    dynasm!(ops
-        ; lea rdi, [->hello]
-        ; mov rsi, QWORD hello_string.len() as _
-        ; mov rax, QWORD print as _
-        ; call rax
-        ; ret);
+    let ret = BfVM::new(
+        &opt.file_path,
+        Box::new(stdin.lock()),
+        Box::new(stdout.lock()),
+        opt.optimize,
+    )
+    .and_then(|mut vm| vm.run());
 
-    let buf = ops.finalize().unwrap();
+    if let Err(e) = &ret {
+        eprintln!("bfjit: {}", e);
+    }
 
-    let hello_fn: unsafe extern "sysv64" fn() -> u8 = 
-        unsafe { std::mem::transmute(buf.ptr(hello)) };
-
-    let ret = unsafe { hello_fn() };
-
-    assert_eq!(ret, 0);
+    std::process::exit(ret.is_err() as i32)
 }

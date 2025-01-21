@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+clap = { version = "4.5.27", features = ["derive"] }
 dynasm = "3.0.1"
 dynasmrt = "3.0.1"
 thiserror = "2.0.11"
