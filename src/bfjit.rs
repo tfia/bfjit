@@ -52,7 +52,103 @@ impl BfVM {
     }
 
     fn compile(code: &[BfIR]) -> Result<(dynasmrt::ExecutableBuffer, dynasmrt::AssemblyOffset)> {
-        todo!()
+        let mut ops = dynasmrt::x64::Assembler::new()?;
+        let start = ops.offset();
+
+        let mut loop_stack: Vec<(dynasmrt::DynamicLabel, dynasmrt::DynamicLabel)> = vec![];
+
+        // this:         rdi r12
+        // memory_start: rsi r13
+        // memory_end:   rdx r14
+        // ptr:          rcx r15
+
+        dynasm!(ops
+            ; push rax
+            ; mov r12, rdi   // save this
+            ; mov r13, rsi   // save memory_start
+            ; mov r14, rdx   // save memory_end
+            ; mov rcx, rsi   // ptr = memory_start
+        );
+
+        use BfIR::*;
+        for &ir in code {
+            match ir {
+                AddPtr(x) => dynasm!(ops
+                    ; add rcx, x as i32 // ptr += x
+                    ; jc ->overflow
+                    ; cmp rcx, r14      // ptr - memory_end
+                    ; jnb ->overflow
+                ),
+                SubPtr(x) => dynasm!(ops
+                    ; sub rcx, x as i32 // ptr += x
+                    ; jc ->overflow
+                    ; cmp rcx, r13      // ptr - memory_start
+                    ; jb ->overflow
+                ),
+                AddVal(x) => dynasm!(ops
+                    ; add BYTE [rcx], x as i8   // *ptr += x
+                ),
+                SubVal(x) => dynasm!(ops
+                    ; sub BYTE [rcx], x as i8   // *ptr -= x
+                ),
+                GetByte => dynasm!(ops
+                    ; mov r15, rcx      // save ptr
+                    ; mov rdi, r12      // load this
+                    ; mov rsi, rcx      // load ptr
+                    ; mov rax, QWORD BfVM::getbyte as _ // (this, ptr)
+                    ; call rax
+                    ; test rax, rax
+                    ; jnz ->io_error
+                    ; mov rcx, r15      // recover ptr
+                ),
+                PutByte => dynasm!(ops
+                    ; mov r15, rcx      // save ptr
+                    ; mov rdi, r12      // load this
+                    ; mov rsi, rcx      // load ptr
+                    ; mov rax, QWORD BfVM::putbyte as _ // (this, ptr)
+                    ; call rax
+                    ; test rax, rax
+                    ; jnz ->io_error
+                    ; mov rcx, r15      // recover ptr
+                ),
+                Jz => {
+                    let left = ops.new_dynamic_label();
+                    let right = ops.new_dynamic_label();
+                    loop_stack.push((left, right));
+
+                    dynasm!(ops
+                        ; cmp BYTE [rcx], 0
+                        ; jz => right       // jmp if *ptr == 0
+                        ; => left
+                    )
+                }
+                Jnz => {
+                    let (left, right) = loop_stack.pop().unwrap();
+                    
+                    dynasm!(ops
+                        ; cmp BYTE [rcx], 0
+                        ; jnz => left       // jmp if *ptr != 0
+                        ; => right
+                    )
+                }
+            }
+        }
+
+        dynasm!(ops
+            ; xor rax, rax
+            ; jmp >exit
+            ; -> overflow:
+            ; mov rax, QWORD BfVM::overflow_error as _
+            ; call rax
+            ; jmp >exit
+            ; -> io_error:
+            ; exit:
+            ; pop rdx
+            ; ret
+        );
+
+        let code = ops.finalize().unwrap();
+        Ok((code, start))
     }
 
     pub fn new(
